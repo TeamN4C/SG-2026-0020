@@ -45,7 +45,7 @@ struct WerSvcElevatedLaunchMessage {
     DWORD Reserved34;               // +0x34
     HANDLE FileMapping;             // +0x38
     HANDLE SourceHandles[16];       // +0x40
-    BOOL CopySourceHandles;         // +0xc0
+    DWORD SourceHandleCount;        // +0xc0
     DWORD ReservedC4;               // +0xc4
     HANDLE NewProcessHandle;        // +0xc8
     BYTE Padding[1192];             // total 0x578
